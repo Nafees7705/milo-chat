@@ -7,9 +7,22 @@ import { guestHeaders } from "./guest";
 
 let cachedVoices: SpeechSynthesisVoice[] = [];
 
+function refreshVoices(): void {
+  if (typeof speechSynthesis === "undefined") return;
+  const voices = speechSynthesis.getVoices();
+  if (voices.length) cachedVoices = voices;
+}
+
+// Chrome loads voices asynchronously, long after the page starts. Keep
+// refreshing so the first speak() doesn't permanently cache an empty list.
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  speechSynthesis.onvoiceschanged = refreshVoices;
+  refreshVoices();
+}
+
 function loadVoices(): SpeechSynthesisVoice[] {
   if (typeof speechSynthesis === "undefined") return [];
-  cachedVoices = cachedVoices.length ? cachedVoices : speechSynthesis.getVoices();
+  refreshVoices();
   return cachedVoices;
 }
 
@@ -20,7 +33,9 @@ function pickVoice(preferred?: string): SpeechSynthesisVoice | null {
     const match = voices.find((v) => v.name === preferred);
     if (match) return match;
   }
-return (
+  const nice = voices.find((v) => v.name && /natural|neural|\bgoogle us english\b/i.test(v.name));
+  return (
+    nice ??
     voices.find((v) => v.lang.startsWith("en-GB")) ??
     voices.find((v) => v.lang.startsWith("en-US")) ??
     voices.find((v) => v.lang.startsWith("en")) ??
@@ -70,8 +85,24 @@ export function usePlayingText(): string {
   );
 }
 
+/** Strip markdown that is hideous to hear (bold/italic stars, code ticks,
+ *  links, headings, bullets, blockquote markers) before handing text to TTS. */
+function cleanForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, "\ncode block\n")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_~]/g, "")
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/^\s*>\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function chunkText(text: string, maxLen = 200): string[] {
-  const clean = text.replace(/```[\s\S]*?```/g, "code block").trim();
+  const clean = cleanForSpeech(text);
   if (!clean) return [];
   const parts = clean.match(/[^.!?\n]+[.!?]?\s*/g) ?? [clean];
   const chunks: string[] = [];
@@ -117,14 +148,24 @@ export function speak(text: string, opts: { voice?: string; rate?: number; force
     }
     const utter = new SpeechSynthesisUtterance(chunks[index++]);
     if (voice) utter.voice = voice;
-    utter.rate = rate;
+    utter.rate = Math.min(2, Math.max(0.5, rate));
     utter.pitch = 1.02;
-    utter.onend = () => speakNext();
+    utter.onend = () => {
+      // Chrome sometimes fires onend while the engine still reports
+      // `speaking === true`; a cancel un-sticks it before the next chunk.
+      if (id === sessionId && speechSynthesis.speaking) speechSynthesis.cancel();
+      speakNext();
+    };
     utter.onerror = (event) => {
       if (event.error === "canceled" || event.error === "interrupted") return;
       speakNext();
     };
-    speechSynthesis.speak(utter);
+    // A short gap between back-to-back utterances avoids Chrome's stutter
+    // and dropped-chunk glitches when speaking long responses.
+    setTimeout(() => {
+      if (id !== sessionId) return;
+      speechSynthesis.speak(utter);
+    }, 30);
   };
   speakNext();
 }
