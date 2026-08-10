@@ -9,12 +9,6 @@ conversation, and listens if you'd rather talk than type.
 
 ---
 
-## Screenshots
-
-| Landing page | Chat workspace |
-| --- | --- |
-| ![Milo landing page](docs/1-landing.png) | ![Milo chat workspace](docs/2-chat.png) |
-
 ## Tech stack
 
 - **Framework** — Next.js 16 (App Router), React 19, TypeScript
