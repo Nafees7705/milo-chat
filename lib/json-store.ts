@@ -1,9 +1,10 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ChatMessage, ChatDetail, ChatSummary } from "./persistence";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.INTERNEE_STORE_DIR ?? path.join(os.tmpdir(), "milo-chat-data");
 const FILE = path.join(DATA_DIR, "store.json");
 
 type StoredConv = {
@@ -33,8 +34,12 @@ async function load(): Promise<Store> {
 
 async function save(): Promise<void> {
   if (!cache) return;
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(FILE, JSON.stringify(cache, null, 2), "utf8");
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(FILE, JSON.stringify(cache, null, 2), "utf8");
+  } catch (err) {
+    console.warn("[json-store] write failed, keeping data in-memory only.", err);
+  }
 }
 
 function byOwner(store: Store, owner: string) {

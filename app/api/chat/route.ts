@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { chatStream } from "@/lib/ai";
-import { persistence, type ChatMessage } from "@/lib/persistence";
+import { persistence, type ChatDetail, type ChatMessage } from "@/lib/persistence";
 import { buildMessages, distillMemory, inferTitle, shouldSummarize } from "@/lib/memory";
 import { resolveOwner } from "@/lib/identity";
 
@@ -30,21 +30,33 @@ export async function POST(request: NextRequest) {
   const userText = (payload.message ?? "").trim();
   if (!userText) return Response.json({ error: "Message can't be empty." }, { status: 400 });
 
-  let conversationId = payload.conversationId;
-  let conversation = conversationId ? await persistence.getConversation(owner, conversationId) : null;
-  if (!conversation) {
-    conversationId = await persistence.createConversation(owner);
-    conversation = { id: conversationId, title: "New conversation", memory: "", messages: [], updatedAt: new Date().toISOString() };
+  let conversationId: string | null = payload.conversationId ?? null;
+  let conversation: ChatDetail | null = null;
+  try {
+    conversation = conversationId ? await persistence.getConversation(owner, conversationId) : null;
+    if (!conversation) {
+      conversationId = await persistence.createConversation(owner);
+      conversation = { id: conversationId, title: "New conversation", memory: "", messages: [], updatedAt: new Date().toISOString() };
+    }
+  } catch (err) {
+    console.warn("[chat] Storage unavailable, continuing in-memory for this request.", err);
+    conversationId = null;
+    conversation = { id: "", title: "New conversation", memory: "", messages: [], updatedAt: new Date().toISOString() };
   }
-  const cid = conversationId as string;
 
   const userMsg: ChatMessage = { id: `m${conversation.messages.length}`, role: "user", content: userText };
   const history = [...conversation.messages];
 
   // Persist the user's message up front (optimistic UI is fine, server is source of truth).
-  await persistence.appendMessages(owner, cid, [userMsg], {
-    title: history.length === 0 ? inferTitle([userMsg]) : undefined,
-  });
+  if (conversationId) {
+    try {
+      await persistence.appendMessages(owner, conversationId, [userMsg], {
+        title: history.length === 0 ? inferTitle([userMsg]) : undefined,
+      });
+    } catch (err) {
+      console.warn("[chat] Failed to persist user message.", err);
+    }
+  }
 
   const apiMessages = buildMessages([...history, userMsg], conversation.memory);
 
@@ -65,20 +77,24 @@ export async function POST(request: NextRequest) {
           }
 
           // Persist the finished assistant reply.
-          if (assistantText.trim()) {
+          if (assistantText.trim() && conversationId) {
             const reply: ChatMessage = {
               id: `m${conversation.messages.length + 1}`,
               role: "assistant",
               content: assistantText,
             };
-            await persistence.appendMessages(owner, cid, [reply]);
+            try {
+              await persistence.appendMessages(owner, conversationId, [reply]);
 
-            // Long-term memory: occasionally distil the whole thread.
-            const totalExchanges = history.length / 2 + 1;
-            if (shouldSummarize(Math.ceil(totalExchanges))) {
-              void distillMemory([...history, userMsg, reply], conversation.memory).then((memory) =>
-                persistence.setMemory(owner, cid, memory)
-              );
+              // Long-term memory: occasionally distil the whole thread.
+              const totalExchanges = history.length / 2 + 1;
+              if (shouldSummarize(Math.ceil(totalExchanges))) {
+                void distillMemory([...history, userMsg, reply], conversation.memory).then((memory) =>
+                  persistence.setMemory(owner, conversationId, memory)
+                );
+              }
+            } catch (err) {
+              console.warn("[chat] Failed to persist assistant reply.", err);
             }
           }
 

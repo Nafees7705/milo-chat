@@ -46,6 +46,12 @@ export function canUseMongo(): boolean {
   return Boolean(MONGODB_URI);
 }
 
+let lastDbError: string | null = null;
+
+export function getLastDbError(): string | null {
+  return lastDbError;
+}
+
 export async function connectDB(): Promise<boolean> {
   if (!canUseMongo()) return false;
   await ensureSrvDns();
@@ -60,6 +66,7 @@ export async function connectDB(): Promise<boolean> {
     cached.conn = await cached.promise;
     return true;
   } catch (err) {
+    lastDbError = err instanceof Error ? err.message : String(err);
     console.warn("[db] Mongo connection failed, falling back to local store.", err);
     cached.promise = null;
     cached.failedAt = Date.now();
