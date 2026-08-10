@@ -9,6 +9,27 @@ conversation, and listens if you'd rather talk than type.
 
 ---
 
+## Screenshots
+
+| Landing page | Chat workspace |
+| --- | --- |
+| ![Milo landing page](docs/1-landing.png) | ![Milo chat workspace](docs/2-chat.png) |
+
+## Tech stack
+
+- **Framework** — Next.js 16 (App Router), React 19, TypeScript
+- **Streaming** — Server-Sent Events (`/api/chat`) + React Suspense
+- **AI** — provider-agnostic (`lib/ai.ts`): Groq, OpenAI, or Gemini, with
+  Whisper transcription for voice input
+- **Voice output** — browser `SpeechSynthesis` (chunked, cancellable)
+- **Persistence** — MongoDB via Mongoose, with a local JSON fallback
+  (`lib/json-store.ts`)
+- **Auth** — Clerk (optional; guest mode without keys)
+- **Realtime** — `ws` WebSocket server (`ws-server.mjs` / `server.mjs`)
+- **Styling** — hand-written CSS with CSS variables and a light/dark theme
+
+---
+
 ## Features
 
 | Requirement | Where in the code |
@@ -37,6 +58,8 @@ realtime channel, and multi-turn conversations with memory (`lib/memory.ts`).
   shows up in the chat header.
 
 ## Getting started
+
+**Prerequisites:** Node.js 20+ and npm.
 
 ```bash
 npm install
@@ -73,6 +96,32 @@ Copy `.env.example` to `.env.local` and fill in the gaps.
 | `WS_PATH` | WebSocket endpoint | `/ws` |
 | `NEXT_PUBLIC_WS_URL` | Full WebSocket URL for dev (separate port) | same-origin `/ws` |
 
+## Project structure
+
+```
+├── app/
+│   ├── page.tsx              # Landing page (Server Component)
+│   ├── chat/page.tsx         # Chat workspace with Suspense shell
+│   └── api/
+│       ├── chat/route.ts     # POST → SSE streaming chat
+│       ├── conversations/    # List / create / delete conversations
+│       ├── messages/         # Load a conversation's messages
+│       └── transcribe/       # Whisper audio transcription
+├── components/
+│   ├── ChatShell.tsx         # Chat state machine (streaming, memory, realtime)
+│   └── chat/                 # Composer, Thread, Sidebar, Welcome, Markdown
+├── lib/
+│   ├── ai.ts                 # Provider-agnostic AI + Whisper clients
+│   ├── memory.ts             # Prompt window + distilled long-term memory
+│   ├── db.ts / json-store.ts # MongoDB or local JSON persistence
+│   ├── identity.ts           # Clerk auth + guest sessions
+│   ├── use-realtime.ts       # WebSocket hook (presence, typing, sync)
+│   └── voice.ts              # Speech output + mic recording
+├── dev.mjs                   # Dev runner: next dev + realtime server
+├── server.mjs                # Production server: Next + WebSocket on one port
+└── ws-server.mjs             # Standalone realtime WebSocket server
+```
+
 ## How it works
 
 **Server-rendered shell, client-rendered chat.** The routes are React Server
@@ -107,3 +156,7 @@ indicators, presence and finished replies fan out to every open tab.
 | `npm run start:prod` | Production server only (`next start`) |
 | `npm run ws` | Run just the realtime server (`ws-server.mjs`) |
 | `npm run lint` | ESLint |
+
+## License
+
+[MIT](LICENSE) — free to use, modify and share.
